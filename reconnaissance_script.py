@@ -15,7 +15,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException, StaleElementReferenceException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
 
@@ -302,57 +302,42 @@ def open_question_from_list(driver):
     except Exception:
         pass
 
-    # We will always re-query fresh elements to avoid stale references
+    # Try targeted clicks first (top-most row/question text or checkbox square)
     targeted_xpaths = [
         "(//tr[contains(@class,'xforms-repeat-item')])[1]",
         "(//table//tr[.//td])[1]",
         "(//table//tr[.//td])[2]",
         "(//table//tr[.//td])[1]//td[last()]",
-        "(//table//tr)[1]//td[1]",
-        "(//table//tr)[1]//td[2]",
     ]
-
-    for attempt in range(3):
-        for xp in targeted_xpaths:
-            try:
-                el = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, xp)))
-                try:
-                    ActionChains(driver).move_to_element(el).pause(0.1).click(el).perform()
-                except StaleElementReferenceException:
-                    # Re-find and try JS click
-                    el = driver.find_element(By.XPATH, xp)
-                    driver.execute_script("arguments[0].click();", el)
-                time.sleep(2)
-                if _is_question_view(driver):
-                    print(f"  Opened via targeted selector: {xp}")
-                    return True
-            except Exception:
-                continue
-
-        # Generic scan of first 10 rows; always re-fetch fresh
+    for xp in targeted_xpaths:
         try:
-            rows = driver.find_elements(By.XPATH, "//table//tr[.//td]")
+            el = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, xp)))
+            ActionChains(driver).move_to_element(el).pause(0.1).click(el).perform()
+            time.sleep(2)
+            if _is_question_view(driver):
+                print(f"  Opened via targeted selector: {xp}")
+                return True
         except Exception:
-            rows = []
-        for row in rows[:10]:
-            try:
-                # Click the question text cell or the first cell
-                try:
-                    cell = row.find_element(By.XPATH, ".//td[contains(@class,'Question') or contains(@class,'Вопрос')] | .//td[2]")
-                except Exception:
-                    cell = row.find_element(By.XPATH, ".//td[1]")
-                try:
-                    ActionChains(driver).move_to_element(cell).pause(0.1).click(cell).perform()
-                except StaleElementReferenceException:
-                    # Re-locate the row by text, fallback to JS click on row
-                    driver.execute_script("arguments[0].click();", row)
-                time.sleep(2)
-                if _is_question_view(driver):
-                    print("  Opened via generic row click")
-                    return True
-            except Exception:
-                continue
+            continue
 
+    candidates = find_question_list_entries(driver)
+    if not candidates:
+        print("  No candidates found.")
+        return False
+
+    wait = WebDriverWait(driver, 10)
+    for cand in candidates:
+        el = cand["element"]
+        try:
+            if el.is_displayed() and el.is_enabled():
+                ActionChains(driver).move_to_element(el).pause(0.2).click(el).perform()
+                time.sleep(2)
+                # Strong check: we must see a question header like "Вопрос X из Y"
+                if _is_question_view(driver):
+                    print(f"  Opened via: {cand['description']}")
+                    return True
+        except Exception:
+            continue
     print("  Could not open any question.")
     return False
 
@@ -1111,8 +1096,9 @@ def main():
         # Test clicking approaches
         test_clicking_approaches(driver)
 
-        # Iterate questions and extract data (first set)
-        iterate_questions(driver, max_questions=80, out_path="questions.jsonl", enable_network_logs=True)
+        # Iterate questions and extract data (first set) -> save to next question_set_N.jsonl
+        first_out = _next_question_set_filename(".")
+        iterate_questions(driver, max_questions=80, out_path=first_out, enable_network_logs=True)
 
         # Run additional quizzes, saving as question_set_1.jsonl, question_set_2.jsonl, ...
         loop_additional_quizzes(driver, num_additional_sets=2, wait_seconds=7)
