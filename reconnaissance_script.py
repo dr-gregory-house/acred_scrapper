@@ -18,6 +18,12 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
+from sqlite_store import SQLiteStore
+from good_turing import GoodTuringEstimator
+import hashlib
+from datetime import datetime
+import threading
+import math
 
 # Load environment variables
 load_dotenv()
@@ -26,6 +32,18 @@ load_dotenv()
 BRAVE_PATH = "/usr/bin/brave-browser"
 DRIVER_PATH = "./chromedriver-linux64/chromedriver"
 LOGIN_URL = "https://selftest.mededtech.ru/login.jsp"
+
+# Output / persistence toggles via environment
+USE_SQLITE = os.getenv("USE_SQLITE", "0") == "1"
+SQLITE_PATH = os.getenv("SQLITE_PATH", "mcq.db")
+SET_LABEL = os.getenv("SET_LABEL")
+ADDITIONAL_SETS = int(os.getenv("ADDITIONAL_SETS", os.getenv("QUIZ_LOOPS", "2")))
+
+def _bool_env(var_name, default=False):
+    v = os.getenv(var_name)
+    if v is None:
+        return default
+    return v.strip().lower() in {"1", "true", "yes", "y"}
 
 def setup_driver():
     """Setup and configure the Chrome driver"""
@@ -863,6 +881,29 @@ def iterate_questions(driver, max_questions=80, out_path="questions.jsonl", enab
         return 0
 
     extracted = 0
+    # Optional SQLite + GT estimator setup
+    store = None
+    estimator = None
+    run_id = None
+    duplicates = 0
+    uniques = 0
+    # Track question-hash frequencies for pool-size estimation
+    qhash_to_count = {}
+    if USE_SQLITE:
+        try:
+            store = SQLiteStore(SQLITE_PATH)
+            store.connect()
+            estimator = GoodTuringEstimator()
+            # Start run row
+            started_iso = datetime.utcnow().isoformat() + "Z"
+            try:
+                run_id = store.run_start(label=SET_LABEL, started_at_iso=started_iso)
+            except Exception:
+                run_id = None
+        except Exception as e:
+            print(f"⚠️  SQLite init failed: {e}")
+            store = None
+            estimator = None
     start_time = time.time()  # Start timer
     with open(out_path, "w", encoding="utf-8") as f:
         for i in range(max_questions):
@@ -915,8 +956,95 @@ def iterate_questions(driver, max_questions=80, out_path="questions.jsonl", enab
                 if parsed_schema.get("is_last") is not None:
                     record["is_last"] = parsed_schema.get("is_last")
 
+            # Persist JSONL as before
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
             f.flush()
+
+            # Persist to SQLite if enabled
+            try:
+                if store is not None:
+                    # Build stable question hash over text + sorted options
+                    qtext = record.get("question_text") or ""
+                    opts_for_hash = []
+                    for o in record.get("options", []) or []:
+                        opts_for_hash.append((o.get("letter") or "", o.get("text") or ""))
+                    opts_for_hash.sort()
+                    hasher = hashlib.sha256()
+                    hasher.update(qtext.encode("utf-8", errors="ignore"))
+                    for lt, tx in opts_for_hash:
+                        hasher.update(b"|LT|")
+                        hasher.update(lt.encode("utf-8", errors="ignore"))
+                        hasher.update(b"|TX|")
+                        hasher.update(tx.encode("utf-8", errors="ignore"))
+                    qhash = hasher.hexdigest()
+
+                    # Duplicate detection and frequency accounting
+                    is_dup = False
+                    try:
+                        is_dup = store.hash_exists(qhash)
+                    except Exception:
+                        is_dup = False
+                    if is_dup:
+                        duplicates += 1
+                    else:
+                        uniques += 1
+                    # Update in-memory counts for Chao1 / GT over hashes
+                    prev_c = qhash_to_count.get(qhash, 0)
+                    qhash_to_count[qhash] = prev_c + 1
+
+                    options_for_db = []
+                    for o in record.get("options", []) or []:
+                        # Normalize fields across DOM and schema paths
+                        options_for_db.append({
+                            "letter": o.get("letter"),
+                            "text": o.get("text"),
+                            "is_correct": bool(o.get("is_correct") or o.get("is_true")),
+                        })
+                    store.insert_question_with_options(
+                        set_label=SET_LABEL,
+                        question_num=(record.get("question_num") if record.get("question_num") is not None else str(record.get("index"))),
+                        question_text=record.get("question_text"),
+                        options=options_for_db,
+                        qhash=qhash,
+                    )
+                    # Update Good–Turing counts incrementally for correct option texts
+                    if estimator is not None:
+                        for o in options_for_db:
+                            if o.get("is_correct") and o.get("text"):
+                                estimator.increment(o["text"], 1)
+            except Exception as e:
+                print(f"⚠️  SQLite write failed: {e}")
+
+            # Optionally annotate current record with GT probabilities (preview/logging)
+            try:
+                if estimator is not None and record.get("options"):
+                    p0 = estimator.probability_of_unseen()
+                    annotated = []
+                    for o in record["options"]:
+                        text_val = o.get("text")
+                        p = estimator.smoothed_probability(text_val) if text_val else None
+                        o_copy = dict(o)
+                        o_copy["gt_prob"] = p if p is not None else p0
+                        annotated.append(o_copy)
+                    record["options"] = annotated
+            except Exception:
+                pass
+
+            # Compute Good–Turing P0 and Chao1 for question hashes
+            try:
+                total_obs_q = sum(qhash_to_count.values())
+                f1 = sum(1 for c in qhash_to_count.values() if c == 1)
+                f2 = sum(1 for c in qhash_to_count.values() if c == 2)
+                p0_hashes = (float(f1) / float(total_obs_q)) if total_obs_q > 0 else 0.0
+                if f2 > 0:
+                    chao1 = len(qhash_to_count) + (f1 * f1) / (2.0 * f2)
+                else:
+                    chao1 = float(len(qhash_to_count))  # fallback
+                # periodic terminal stats
+                if extracted % 5 == 0 or i == 0:
+                    print(f"[stats] step={extracted} total={extracted} unique={uniques} dup={duplicates} P0={p0_hashes:.4f} Chao1≈{chao1:.1f}")
+            except Exception:
+                pass
             extracted += 1
 
             # Periodic payload cleanup: purge every 5 questions to control disk usage
@@ -952,6 +1080,26 @@ def iterate_questions(driver, max_questions=80, out_path="questions.jsonl", enab
     elapsed_time = end_time - start_time
     print(f"\n✅ Extracted {extracted} question(s) in {elapsed_time:.2f} seconds ({elapsed_time/extracted:.2f} seconds per question)")
     print(f"💾 Data saved to {out_path}")
+    try:
+        if store is not None:
+            # Close out run stats
+            try:
+                ended_iso = datetime.utcnow().isoformat() + "Z"
+                duration = time.time() - start_time
+                if run_id is not None:
+                    store.run_finish(
+                        run_id=run_id,
+                        ended_at_iso=ended_iso,
+                        total_questions=extracted,
+                        unique_questions=uniques,
+                        duplicate_questions=duplicates,
+                        duration_seconds=float(duration),
+                    )
+            except Exception:
+                pass
+            store.close()
+    except Exception:
+        pass
     return extracted
 
 
