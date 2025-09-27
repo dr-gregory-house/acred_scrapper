@@ -52,6 +52,7 @@ def setup_driver():
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--window-size=1920,1080")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -90,7 +91,6 @@ def login_and_navigate_to_results(driver):
     try:
         popup = driver.find_element(By.XPATH, "//div[contains(@class, 'gwt-PopupPanelGlass')]")
         if popup.is_displayed():
-            print("🔄 Dismissing popup...")
             driver.execute_script("arguments[0].style.display = 'none';", popup)
             time.sleep(1)
     except:
@@ -100,7 +100,7 @@ def login_and_navigate_to_results(driver):
     time.sleep(2)
     
     # Click on test
-    print("🎯 Clicking on test...")
+    print("🎯 Starting test...")
     test_xpath = "//span[@class='extraSpace' and contains(text(), 'РЭ_Лечебное дело, 2025')]"
     test_element = driver.find_element(By.XPATH, test_xpath)
     test_element.click()
@@ -121,12 +121,10 @@ def login_and_navigate_to_results(driver):
         time.sleep(5)
     
     # Click "Go to first question"
-    print("🎯 Clicking 'Go to first question'...")
     wait.until(EC.element_to_be_clickable((By.XPATH, "//span[contains(text(), 'Перейти к первому вопросу')]"))).click()
     time.sleep(3)
     
     # Complete test immediately to get to results
-    print("🚪 Completing test to reach results...")
     try:
         complete_button = driver.find_element(By.XPATH, "//span[contains(text(), 'Завершить тестирование')]")
         complete_button.click()
@@ -142,32 +140,21 @@ def login_and_navigate_to_results(driver):
     except:
         pass
     
-    print("✅ Reached results page")
+    print("✅ Ready to extract questions")
     return driver
 
 def comprehensive_page_analysis(driver):
     """Quick analysis of the current page"""
-    print("🔍 Analyzing page structure...")
-    
     try:
-        # Basic page info
-        current_url = driver.current_url
-        page_title = driver.title
-        
-        print(f"📍 URL: {current_url}")
-        print(f"📄 Title: {page_title}")
-        
         # Look for question-related elements
         question_elements = driver.find_elements(By.XPATH, "//*[contains(text(), 'Вопрос')]")
         tables = driver.find_elements(By.TAG_NAME, "table")
-        clickable_elements = driver.find_elements(By.XPATH, "//*[@onclick or @href or contains(@class, 'clickable') or contains(@class, 'button')]")
         
-        print(f"📊 Found: {len(tables)} tables, {len(question_elements)} question elements, {len(clickable_elements)} clickable elements")
+        print(f"📊 Found: {len(tables)} tables, {len(question_elements)} question elements")
         
         # Save page source for manual inspection
         with open("page_source.html", "w", encoding="utf-8") as f:
             f.write(driver.page_source)
-        print("💾 Page source saved for inspection")
         
         return True
         
@@ -213,7 +200,6 @@ def find_question_list_entries(driver):
 
 def open_question_from_list(driver):
     """Try clicking the first question entry/square from the list page."""
-    print("🖱️  Opening question from list...")
     def _is_question_view(d):
         try:
             hdr = d.find_elements(By.XPATH, "//*[contains(text(),'Вопрос ') and contains(text(),' из ')]")
@@ -242,14 +228,12 @@ def open_question_from_list(driver):
             ActionChains(driver).move_to_element(el).pause(0.1).click(el).perform()
             time.sleep(2)
             if _is_question_view(driver):
-                print(f"  Opened via targeted selector: {xp}")
                 return True
         except Exception:
             continue
 
     candidates = find_question_list_entries(driver)
     if not candidates:
-        print("  No candidates found.")
         return False
 
     wait = WebDriverWait(driver, 10)
@@ -264,7 +248,6 @@ def open_question_from_list(driver):
                     return True
         except Exception:
             continue
-    print("❌ Could not open any question.")
     return False
 
 
@@ -359,13 +342,8 @@ def extract_current_question(driver):
         except Exception:
             data["raw_html"] = None
 
-        # Debug info only if extraction failed
-        if not options or not data["question_text"]:
-            print(f"⚠️  Extraction issue: {len(options)} options, text_len={len(data['question_text'] or '')}")
-
         return data
     except Exception as e:
-        print(f"❌ Extract failed: {e}")
         return data
 
 
@@ -441,7 +419,6 @@ def extract_question_dom_precise(driver):
 
         return result
     except Exception as e:
-        print(f"⚠️  Precise DOM extract failed: {e}")
         return result
 
 
@@ -466,7 +443,6 @@ def click_next_question(driver):
                     continue
         return False
     except Exception as e:
-        print(f"❌ Next navigation error: {e}")
         return False
 
 
@@ -475,9 +451,8 @@ def enable_cdp_network_logging(driver):
     try:
         driver.execute_cdp_cmd("Network.enable", {})
         driver.execute_cdp_cmd("Page.enable", {})
-        print("📡 CDP Network logging enabled")
     except Exception as e:
-        print(f"⚠️  Could not enable CDP logging: {e}")
+        pass
 
 
 def _start_new_test_in_new_tab(driver):
@@ -563,10 +538,6 @@ def drain_performance_logs(driver, limit=200):
                 continue
     except Exception:
         pass
-    if logs:
-        print("\n🌐 Recent network events (sample):")
-        for item in logs[:10]:
-            print(f"  {item['method']}: {item['url'][:120]}")
     return logs
 
 
@@ -600,8 +571,6 @@ def capture_recent_secured_data_bodies(driver, logs, out_dir="data_payloads"):
                     continue
     except Exception:
         pass
-    if written:
-        print(f"📝 Saved {len(written)} secured/data payload(s) to '{out_dir}'")
     return written
 
 
@@ -641,9 +610,8 @@ def cleanup_payloads(out_dir="data_payloads", keep_latest_n=50):
                 os.remove(fp)
             except Exception:
                 pass
-        print(f"🧹 data_payloads cleaned; kept {min(len(entries), keep_latest_n)} recent file(s)")
     except Exception as e:
-        print(f"⚠️  cleanup skipped: {e}")
+        pass
 
 
 def _next_question_set_filename(base_dir="."):
@@ -759,16 +727,15 @@ def parse_schema_xml(schema_xml):
                     })
         return result
     except Exception as e:
-        print(f"⚠️  Schema parse error: {e}")
         return None
 
 
-def iterate_questions(driver, max_questions=80, out_path="questions.jsonl", enable_network_logs=True, clean_payloads_first=True):
+def iterate_questions(driver, max_questions=80, out_path="questions.jsonl", enable_network_logs=True, clean_payloads_first=True, cycle_num=1):
     """From the question list page, open first question, then iterate via Next, extracting data.
 
     Writes JSONL to out_path.
     """
-    print("\n🔁 Iterating questions and extracting data...")
+    print(f"\n🔄 CYCLE {cycle_num}: Starting question extraction...")
     if enable_network_logs:
         enable_cdp_network_logging(driver)
 
@@ -777,7 +744,7 @@ def iterate_questions(driver, max_questions=80, out_path="questions.jsonl", enab
 
     opened = open_question_from_list(driver)
     if not opened:
-        print("❌ Could not open a question from list. Aborting iteration.")
+        print(f"❌ CYCLE {cycle_num}: Could not open a question from list. Aborting iteration.")
         return 0
 
     extracted = 0
@@ -814,6 +781,10 @@ def iterate_questions(driver, max_questions=80, out_path="questions.jsonl", enab
     start_time = time.time()  # Start timer
     with open(out_path, "w", encoding="utf-8") as f:
         for i in range(max_questions):
+            # Show progress every 5 questions
+            if (i + 1) % 5 == 0 or i == 0:
+                print(f"📝 CYCLE {cycle_num}: Processing question {i + 1}/{max_questions}")
+            
             recent_logs = drain_performance_logs(driver) if enable_network_logs else []
             parsed_schema = None
             if enable_network_logs and recent_logs:
@@ -967,11 +938,11 @@ def iterate_questions(driver, max_questions=80, out_path="questions.jsonl", enab
                     else:
                         chao1 = float(len(qhash_to_count))
                 
-                # Progress indicator
-                if extracted % 10 == 0 or i == 0:
-                    print(f"📝 Progress: {extracted} questions | Unique: {uniques} | Duplicates: {duplicates} | Pool estimate: {chao1:.0f}")
+                # Progress indicator - only show every 10 questions
+                if extracted % 10 == 0 and extracted > 0:
+                    print(f"📊 CYCLE {cycle_num}: {extracted} questions | Unique: {uniques} | Duplicates: {duplicates}")
             except Exception as e:
-                print(f"⚠️  Statistics computation failed: {e}")
+                pass
             extracted += 1
 
             # Periodic payload cleanup: purge every 5 questions to control disk usage
@@ -985,14 +956,14 @@ def iterate_questions(driver, max_questions=80, out_path="questions.jsonl", enab
             try:
                 if dom_precise and dom_precise.get("question_num") and dom_precise.get("question_total"):
                     if str(dom_precise.get("question_num")) == str(dom_precise.get("question_total")):
-                        print("🛑 Reached last question according to header (saved). Stopping.")
+                        print(f"🛑 CYCLE {cycle_num}: Reached last question. Stopping.")
                         break
             except Exception:
                 pass
 
             moved = click_next_question(driver)
             if not moved:
-                print("⛔ No Next found; stopping iteration.")
+                print(f"⛔ CYCLE {cycle_num}: No Next found; stopping iteration.")
                 break
             # Wait for content change or at least a short delay for dynamic load
             old_sig = get_question_signature(driver)
@@ -1005,21 +976,16 @@ def iterate_questions(driver, max_questions=80, out_path="questions.jsonl", enab
 
     end_time = time.time()
     elapsed_time = end_time - start_time
-    print(f"\n✅ Extracted {extracted} question(s) in {elapsed_time:.2f} seconds ({elapsed_time/extracted:.2f} seconds per question)")
-    print(f"💾 Data saved to {out_path}")
+    print(f"\n✅ CYCLE {cycle_num}: Extracted {extracted} questions in {elapsed_time:.1f}s ({elapsed_time/extracted:.1f}s per question)")
+    print(f"💾 CYCLE {cycle_num}: Data saved to {out_path}")
     
     # Print final statistics if using database-backed estimator
     if estimator is not None:
         try:
             pool = estimator.estimate_total_questions_in_pool()
-            print(f"\n📊 Final Statistics:")
-            print(f"  Questions extracted: {extracted}")
-            print(f"  Unique questions: {uniques}")
-            print(f"  Duplicates: {duplicates}")
-            print(f"  Estimated total pool size: {pool['combined']:.0f} questions")
-            print(f"  Coverage: {(1-pool['p0'])*100:.1f}% of pool observed")
+            print(f"📊 CYCLE {cycle_num}: {extracted} extracted | {uniques} unique | {duplicates} duplicates | Pool: {pool['combined']:.0f} | Coverage: {(1-pool['p0'])*100:.1f}%")
         except Exception as e:
-            print(f"⚠️  Statistics failed: {e}")
+            pass
     try:
         if store is not None:
             # Close out run stats
@@ -1054,7 +1020,8 @@ def loop_additional_quizzes(driver, num_additional_sets=2, wait_seconds=7):
     """
     print(f"\n🔄 Starting {num_additional_sets} additional quiz runs...")
     for k in range(1, num_additional_sets + 1):
-        print(f"\n📝 Starting additional quiz run {k}/{num_additional_sets}...")
+        cycle_num = k + 1  # First cycle was already completed
+        print(f"\n🔄 CYCLE {cycle_num}: Starting additional quiz run {k}/{num_additional_sets}...")
         try:
             time.sleep(wait_seconds)
             # Close current quiz tab
@@ -1086,97 +1053,27 @@ def loop_additional_quizzes(driver, num_additional_sets=2, wait_seconds=7):
             # Start new test in a fresh tab and switch
             started = _start_new_test_in_new_tab(driver)
             if not started:
-                print("⚠️  Could not start a new test. Stopping loop.")
+                print(f"⚠️  CYCLE {cycle_num}: Could not start a new test. Stopping loop.")
                 break
 
             # Extract this set to the next available question_set_N.jsonl
             out_path = _next_question_set_filename(".")
-            print(f"💾 Extracting to: {out_path}")
-            iterate_questions(driver, max_questions=80, out_path=out_path, enable_network_logs=True)
-            print(f"✅ Completed additional quiz run {k}/{num_additional_sets}")
+            print(f"💾 CYCLE {cycle_num}: Extracting to {out_path}")
+            iterate_questions(driver, max_questions=80, out_path=out_path, enable_network_logs=True, cycle_num=cycle_num)
+            print(f"✅ CYCLE {cycle_num}: Completed additional quiz run {k}/{num_additional_sets}")
         except Exception as e:
-            print(f"⚠️  Error in quiz loop iteration {k}: {e}")
+            print(f"⚠️  CYCLE {cycle_num}: Error in quiz loop iteration {k}: {e}")
             break
     
     print(f"\n🎉 Completed all {num_additional_sets} additional quiz runs!")
 
 
-def test_clicking_approaches(driver):
-    """Test different clicking approaches"""
-    print("\n🧪 TESTING CLICKING APPROACHES")
-    print("=" * 40)
-    
-    try:
-        # Approach 1: Look for any clickable elements that might be questions
-        print("\n📋 Approach 1: Looking for clickable question elements...")
-        
-        # Try different selectors for question elements
-        question_selectors = [
-            "//tr[contains(@class, 'xforms-repeat-item')]",
-            "//td[contains(text(), '1') or contains(text(), '2') or contains(text(), '3')]",
-            "//*[contains(@class, 'question')]",
-            "//*[contains(@class, 'item')]",
-            "//*[contains(@class, 'row')]"
-        ]
-        
-        for i, selector in enumerate(question_selectors):
-            try:
-                elements = driver.find_elements(By.XPATH, selector)
-                print(f"  Selector {i+1}: Found {len(elements)} elements")
-                
-                if elements:
-                    # Try clicking on first element
-                    first_elem = elements[0]
-                    try:
-                        text = first_elem.text.strip()
-                        print(f"    First element: '{text[:50]}...'")
-                        
-                        # Check if clickable
-                        is_clickable = first_elem.is_enabled() and first_elem.is_displayed()
-                        print(f"    Clickable: {is_clickable}")
-                        
-                        if is_clickable:
-                            print(f"    Attempting to click...")
-                            first_elem.click()
-                            time.sleep(3)
-                            
-                            # Check what happened
-                            new_url = driver.current_url
-                            print(f"    New URL: {new_url}")
-                            
-                            # Look for changes in the page
-                            new_elements = driver.find_elements(By.XPATH, "//*[contains(text(), 'Вопрос')]")
-                            print(f"    Question elements after click: {len(new_elements)}")
-                            
-                            # Go back if possible
-                            try:
-                                back_button = driver.find_element(By.XPATH, "//*[contains(text(), 'К списку') or contains(text(), 'Назад')]")
-                                back_button.click()
-                                time.sleep(2)
-                                print(f"    Returned to question list")
-                            except:
-                                print(f"    Could not return to question list")
-                                # Refresh page
-                                driver.refresh()
-                                time.sleep(5)
-                            
-                    except Exception as e:
-                        print(f"    Error clicking: {e}")
-                
-            except Exception as e:
-                print(f"  Selector {i+1}: Error - {e}")
-        
-        return True
-        
-    except Exception as e:
-        print(f"❌ Error testing clicking approaches: {e}")
-        return False
 
 def main():
     """Main function"""
-    print("🚀 Starting RECONNAISSANCE SCRIPT")
+    print("🚀 Starting MCQ Scraper")
     print("=" * 50)
-    print(f"📊 Configuration: ADDITIONAL_SETS = {ADDITIONAL_SETS}")
+    print(f"📊 Configuration: {ADDITIONAL_SETS + 1} total cycles")
     
     driver = None
     try:
@@ -1190,7 +1087,8 @@ def main():
 
         # Iterate questions and extract data (first set) -> save to next question_set_N.jsonl
         first_out = _next_question_set_filename(".")
-        iterate_questions(driver, max_questions=80, out_path=first_out, enable_network_logs=True)
+        print(f"💾 CYCLE 1: Extracting to {first_out}")
+        iterate_questions(driver, max_questions=80, out_path=first_out, enable_network_logs=True, cycle_num=1)
 
         # Run additional quizzes, saving as question_set_1.jsonl, question_set_2.jsonl, ...
         loop_additional_quizzes(driver, num_additional_sets=ADDITIONAL_SETS, wait_seconds=7)
@@ -1199,16 +1097,15 @@ def main():
         print(f"📁 Check the question_set_*.jsonl files for extracted data")
         
     except Exception as e:
-        print(f"❌ Reconnaissance failed: {e}")
+        print(f"❌ Scraper failed: {e}")
         import traceback
         traceback.print_exc()
         
     finally:
         if driver:
-            print("\n⏳ Keeping browser open for 60 seconds for manual inspection...")
-            time.sleep(60)
+            print("\n🔚 Closing browser...")
             driver.quit()
-            print("🔚 Driver closed")
+            print("✅ Browser closed")
 
 if __name__ == "__main__":
     main()
