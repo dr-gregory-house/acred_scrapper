@@ -131,6 +131,100 @@ class SQLiteStore:
             counts[str(text)] = int(s or 0)
         return counts
 
+    def get_option_statistics(self) -> Dict[str, Dict[str, int]]:
+        """Return comprehensive option statistics for Good-Turing estimation.
+        
+        Returns: Dict[text, Dict[str, int]] where each inner dict contains:
+        - 'total_count': total occurrences of this option text
+        - 'correct_count': how many times it was marked as correct
+        - 'incorrect_count': how many times it was marked as incorrect
+        """
+        assert self._conn is not None
+        cur = self._conn.cursor()
+        cur.execute(
+            """
+            SELECT 
+                text,
+                COUNT(*) as total_count,
+                SUM(is_correct) as correct_count,
+                COUNT(*) - SUM(is_correct) as incorrect_count
+            FROM options 
+            WHERE text IS NOT NULL 
+            GROUP BY text
+            ORDER BY total_count DESC
+            """
+        )
+        stats: Dict[str, Dict[str, int]] = {}
+        for text, total, correct, incorrect in cur.fetchall():
+            if text is None:
+                continue
+            stats[str(text)] = {
+                'total_count': int(total or 0),
+                'correct_count': int(correct or 0),
+                'incorrect_count': int(incorrect or 0)
+            }
+        return stats
+
+    def get_question_hash_statistics(self) -> Dict[str, int]:
+        """Return question hash frequency counts for Chao1 estimation."""
+        assert self._conn is not None
+        cur = self._conn.cursor()
+        cur.execute(
+            """
+            SELECT qhash, COUNT(*) as frequency
+            FROM questions 
+            WHERE qhash IS NOT NULL 
+            GROUP BY qhash
+            ORDER BY frequency DESC
+            """
+        )
+        counts: Dict[str, int] = {}
+        for qhash, freq in cur.fetchall():
+            if qhash is None:
+                continue
+            counts[str(qhash)] = int(freq or 0)
+        return counts
+
+    def get_database_summary(self) -> Dict[str, Any]:
+        """Return comprehensive database statistics for analysis."""
+        assert self._conn is not None
+        cur = self._conn.cursor()
+        
+        # Basic counts
+        cur.execute("SELECT COUNT(*) FROM questions")
+        total_questions = cur.fetchone()[0]
+        
+        cur.execute("SELECT COUNT(*) FROM options")
+        total_options = cur.fetchone()[0]
+        
+        cur.execute("SELECT COUNT(DISTINCT text) FROM options WHERE text IS NOT NULL")
+        unique_option_texts = cur.fetchone()[0]
+        
+        cur.execute("SELECT COUNT(DISTINCT qhash) FROM questions WHERE qhash IS NOT NULL")
+        unique_question_hashes = cur.fetchone()[0]
+        
+        # Correct answer statistics
+        cur.execute("SELECT SUM(is_correct) FROM options")
+        total_correct_answers = cur.fetchone()[0] or 0
+        
+        # Run statistics
+        cur.execute("SELECT COUNT(*) FROM runs")
+        total_runs = cur.fetchone()[0]
+        
+        cur.execute("SELECT COUNT(*) FROM runs WHERE ended_at IS NOT NULL")
+        completed_runs = cur.fetchone()[0]
+        
+        return {
+            'total_questions': total_questions,
+            'total_options': total_options,
+            'unique_option_texts': unique_option_texts,
+            'unique_question_hashes': unique_question_hashes,
+            'total_correct_answers': total_correct_answers,
+            'total_runs': total_runs,
+            'completed_runs': completed_runs,
+            'correct_answer_rate': total_correct_answers / total_options if total_options > 0 else 0.0
+        }
+
     def hash_exists(self, qhash: str) -> bool:
         assert self._conn is not None
         cur = self._conn.cursor()

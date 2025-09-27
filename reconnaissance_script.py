@@ -19,7 +19,7 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
 from sqlite_store import SQLiteStore
-from good_turing import GoodTuringEstimator
+from good_turing import GoodTuringEstimator, DatabaseGoodTuringEstimator
 import hashlib
 from datetime import datetime
 import threading
@@ -146,121 +146,33 @@ def login_and_navigate_to_results(driver):
     return driver
 
 def comprehensive_page_analysis(driver):
-    """Comprehensive analysis of the current page"""
-    print("\n🔍 COMPREHENSIVE PAGE ANALYSIS")
-    print("=" * 50)
+    """Quick analysis of the current page"""
+    print("🔍 Analyzing page structure...")
     
     try:
         # Basic page info
         current_url = driver.current_url
         page_title = driver.title
-        page_source_length = len(driver.page_source)
         
         print(f"📍 URL: {current_url}")
         print(f"📄 Title: {page_title}")
-        print(f"📄 Page source length: {page_source_length} characters")
-        
-        # Get all tables
-        tables = driver.find_elements(By.TAG_NAME, "table")
-        print(f"\n📊 Found {len(tables)} tables")
-        
-        for i, table in enumerate(tables):
-            try:
-                table_text = table.text.strip()
-                table_class = table.get_attribute('class') or 'No class'
-                print(f"  Table {i+1}: {len(table_text)} chars, class: {table_class}")
-                if len(table_text) > 0:
-                    print(f"    Preview: {table_text[:100]}...")
-            except:
-                print(f"  Table {i+1}: Error reading table")
-        
-        # Get all divs with classes
-        divs = driver.find_elements(By.XPATH, "//div[@class]")
-        print(f"\n📦 Found {len(divs)} divs with classes")
-        
-        class_counts = {}
-        for div in divs:
-            try:
-                class_name = div.get_attribute('class')
-                if class_name:
-                    class_counts[class_name] = class_counts.get(class_name, 0) + 1
-            except:
-                pass
-        
-        # Show most common classes
-        sorted_classes = sorted(class_counts.items(), key=lambda x: x[1], reverse=True)
-        print("  Most common classes:")
-        for class_name, count in sorted_classes[:10]:
-            print(f"    {class_name}: {count}")
         
         # Look for question-related elements
-        print(f"\n🧪 Looking for question-related elements...")
-        
-        # All elements containing "Вопрос"
         question_elements = driver.find_elements(By.XPATH, "//*[contains(text(), 'Вопрос')]")
-        print(f"  Elements containing 'Вопрос': {len(question_elements)}")
-        
-        for i, elem in enumerate(question_elements[:5]):
-            try:
-                text = elem.text.strip()
-                tag = elem.tag_name
-                classes = elem.get_attribute('class') or 'No class'
-                print(f"    {i+1}. '{text[:50]}...' (tag: {tag}, class: {classes})")
-            except:
-                pass
-        
-        # All clickable elements
+        tables = driver.find_elements(By.TAG_NAME, "table")
         clickable_elements = driver.find_elements(By.XPATH, "//*[@onclick or @href or contains(@class, 'clickable') or contains(@class, 'button')]")
-        print(f"\n🖱️  Found {len(clickable_elements)} potentially clickable elements")
         
-        for i, elem in enumerate(clickable_elements[:10]):
-            try:
-                text = elem.text.strip()
-                tag = elem.tag_name
-                classes = elem.get_attribute('class') or 'No class'
-                onclick = elem.get_attribute('onclick') or 'No onclick'
-                if text or classes != 'No class':
-                    print(f"    {i+1}. '{text[:30]}...' (tag: {tag}, class: {classes}, onclick: {onclick[:30]}...)")
-            except:
-                pass
-        
-        # Look for specific patterns
-        print(f"\n🔍 Looking for specific patterns...")
-        
-        patterns = {
-            "Question numbers": "//*[contains(text(), '1') or contains(text(), '2') or contains(text(), '3')]",
-            "Answer options": "//*[contains(text(), 'А') or contains(text(), 'Б') or contains(text(), 'В') or contains(text(), 'Г')]",
-            "Navigation buttons": "//*[contains(text(), 'Далее') or contains(text(), 'Назад') or contains(text(), 'Следующий') or contains(text(), 'Предыдущий')]",
-            "List elements": "//ul | //ol",
-            "Table rows": "//tr",
-            "Table cells": "//td"
-        }
-        
-        for pattern_name, xpath in patterns.items():
-            try:
-                elements = driver.find_elements(By.XPATH, xpath)
-                print(f"  {pattern_name}: {len(elements)} found")
-                
-                # Show first few examples
-                for i, elem in enumerate(elements[:3]):
-                    try:
-                        text = elem.text.strip()
-                        if text and len(text) > 0:
-                            print(f"    {i+1}. '{text[:50]}...'")
-                    except:
-                        pass
-            except Exception as e:
-                print(f"  {pattern_name}: Error - {e}")
+        print(f"📊 Found: {len(tables)} tables, {len(question_elements)} question elements, {len(clickable_elements)} clickable elements")
         
         # Save page source for manual inspection
         with open("page_source.html", "w", encoding="utf-8") as f:
             f.write(driver.page_source)
-        print(f"\n💾 Saved page source to page_source.html")
+        print("💾 Page source saved for inspection")
         
         return True
         
     except Exception as e:
-        print(f"❌ Error in comprehensive analysis: {e}")
+        print(f"❌ Page analysis error: {e}")
         return False
 
 
@@ -269,7 +181,6 @@ def find_question_list_entries(driver):
 
     Returns a list of dicts with keys: element, description.
     """
-    print("\n🧭 Locating question list entries...")
     candidates = []
     try:
         patterns = [
@@ -286,7 +197,6 @@ def find_question_list_entries(driver):
 
         for idx, xp in enumerate(patterns, start=1):
             elems = driver.find_elements(By.XPATH, xp)
-            print(f"  Pattern {idx}: {len(elems)} nodes")
             for el in elems[:50]:
                 try:
                     txt = (el.text or "").strip()
@@ -296,7 +206,6 @@ def find_question_list_entries(driver):
                         candidates.append({"element": el, "description": f"<{tag} class='{cls}'> {txt[:80]}"})
                 except Exception:
                     pass
-        print(f"  Aggregated candidate count: {len(candidates)}")
     except Exception as e:
         print(f"❌ Error locating list entries: {e}")
     return candidates
@@ -304,7 +213,7 @@ def find_question_list_entries(driver):
 
 def open_question_from_list(driver):
     """Try clicking the first question entry/square from the list page."""
-    print("\n🖱️  Attempting to open a question from the list...")
+    print("🖱️  Opening question from list...")
     def _is_question_view(d):
         try:
             hdr = d.find_elements(By.XPATH, "//*[contains(text(),'Вопрос ') and contains(text(),' из ')]")
@@ -352,11 +261,10 @@ def open_question_from_list(driver):
                 time.sleep(2)
                 # Strong check: we must see a question header like "Вопрос X из Y"
                 if _is_question_view(driver):
-                    print(f"  Opened via: {cand['description']}")
                     return True
         except Exception:
             continue
-    print("  Could not open any question.")
+    print("❌ Could not open any question.")
     return False
 
 
@@ -365,7 +273,6 @@ def extract_current_question(driver):
 
     Returns dict with: question_text, options:[{text,is_correct,style}], raw_html
     """
-    print("\n📥 Extracting current question...")
     data = {
         "question_text": None,
         "options": [],
@@ -452,14 +359,9 @@ def extract_current_question(driver):
         except Exception:
             data["raw_html"] = None
 
-        # If no obvious options were found, expose a short preview for debugging
-        print(f"  Question text len: {len(data['question_text'] or '')}")
-        print(f"  Options found: {len(options)} (correct: {sum(1 for o in options if o['is_correct'])})")
-        if data["question_text"]:
-            print(f"  Q preview: {(data['question_text'][:100] if data['question_text'] else '')}...")
-        if options[:3]:
-            for i, o in enumerate(options[:3], start=1):
-                print(f"  Opt{i}: {(o['text'][:80])} | correct={o['is_correct']}")
+        # Debug info only if extraction failed
+        if not options or not data["question_text"]:
+            print(f"⚠️  Extraction issue: {len(options)} options, text_len={len(data['question_text'] or '')}")
 
         return data
     except Exception as e:
@@ -545,7 +447,6 @@ def extract_question_dom_precise(driver):
 
 def click_next_question(driver):
     """Click the Next button if present. Returns True if navigation attempted."""
-    print("\n➡️  Attempting to click Next...")
     try:
         selectors = [
             "//*[contains(text(),'Далее')]/ancestor::*[self::button or self::a or self::span][1]",
@@ -563,7 +464,6 @@ def click_next_question(driver):
                         return True
                 except Exception:
                     continue
-        print("  Next not found.")
         return False
     except Exception as e:
         print(f"❌ Next navigation error: {e}")
@@ -893,7 +793,14 @@ def iterate_questions(driver, max_questions=80, out_path="questions.jsonl", enab
         try:
             store = SQLiteStore(SQLITE_PATH)
             store.connect()
-            estimator = GoodTuringEstimator()
+            
+            # Use database-backed estimator for more reliable estimates
+            estimator = DatabaseGoodTuringEstimator(store, use_correct_answers=True, cache_ttl=300)
+            estimator.load_from_database()
+            
+            # Print initial statistics
+            estimator.print_statistics()
+            
             # Start run row
             started_iso = datetime.utcnow().isoformat() + "Z"
             try:
@@ -1007,44 +914,64 @@ def iterate_questions(driver, max_questions=80, out_path="questions.jsonl", enab
                         options=options_for_db,
                         qhash=qhash,
                     )
-                    # Update Good–Turing counts incrementally for correct option texts
-                    if estimator is not None:
-                        for o in options_for_db:
-                            if o.get("is_correct") and o.get("text"):
-                                estimator.increment(o["text"], 1)
+                    # Note: Database-backed estimator doesn't need incremental updates
+                    # as it loads all historical data from the database
             except Exception as e:
                 print(f"⚠️  SQLite write failed: {e}")
 
-            # Optionally annotate current record with GT probabilities (preview/logging)
+            # Annotate current record with GT probabilities and confidence intervals
             try:
                 if estimator is not None and record.get("options"):
                     p0 = estimator.probability_of_unseen()
                     annotated = []
                     for o in record["options"]:
                         text_val = o.get("text")
-                        p = estimator.smoothed_probability(text_val) if text_val else None
                         o_copy = dict(o)
-                        o_copy["gt_prob"] = p if p is not None else p0
+                        
+                        if text_val:
+                            p = estimator.smoothed_probability(text_val)
+                            if p is not None:
+                                o_copy["gt_prob"] = p
+                                # Add confidence interval
+                                ci_low, ci_high = estimator.get_confidence_interval(text_val)
+                                o_copy["gt_ci_low"] = ci_low
+                                o_copy["gt_ci_high"] = ci_high
+                            else:
+                                o_copy["gt_prob"] = p0
+                                o_copy["gt_ci_low"] = 0.0
+                                o_copy["gt_ci_high"] = p0
+                        else:
+                            o_copy["gt_prob"] = p0
+                            o_copy["gt_ci_low"] = 0.0
+                            o_copy["gt_ci_high"] = p0
+                        
                         annotated.append(o_copy)
                     record["options"] = annotated
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"⚠️  GT annotation failed: {e}")
 
-            # Compute Good–Turing P0 and Chao1 for question hashes
+            # Compute statistics using database-backed estimator
             try:
                 total_obs_q = sum(qhash_to_count.values())
                 f1 = sum(1 for c in qhash_to_count.values() if c == 1)
                 f2 = sum(1 for c in qhash_to_count.values() if c == 2)
                 p0_hashes = (float(f1) / float(total_obs_q)) if total_obs_q > 0 else 0.0
-                if f2 > 0:
-                    chao1 = len(qhash_to_count) + (f1 * f1) / (2.0 * f2)
+                
+                # Use database-backed Chao1 estimate if available
+                if estimator is not None:
+                    db_chao1 = estimator.get_chao1_estimate()
+                    chao1 = db_chao1 if db_chao1 is not None else len(qhash_to_count)
                 else:
-                    chao1 = float(len(qhash_to_count))  # fallback
-                # periodic terminal stats
-                if extracted % 5 == 0 or i == 0:
-                    print(f"[stats] step={extracted} total={extracted} unique={uniques} dup={duplicates} P0={p0_hashes:.4f} Chao1≈{chao1:.1f}")
-            except Exception:
-                pass
+                    if f2 > 0:
+                        chao1 = len(qhash_to_count) + (f1 * f1) / (2.0 * f2)
+                    else:
+                        chao1 = float(len(qhash_to_count))
+                
+                # Progress indicator
+                if extracted % 10 == 0 or i == 0:
+                    print(f"📝 Progress: {extracted} questions | Unique: {uniques} | Duplicates: {duplicates} | Pool estimate: {chao1:.0f}")
+            except Exception as e:
+                print(f"⚠️  Statistics computation failed: {e}")
             extracted += 1
 
             # Periodic payload cleanup: purge every 5 questions to control disk usage
@@ -1080,6 +1007,19 @@ def iterate_questions(driver, max_questions=80, out_path="questions.jsonl", enab
     elapsed_time = end_time - start_time
     print(f"\n✅ Extracted {extracted} question(s) in {elapsed_time:.2f} seconds ({elapsed_time/extracted:.2f} seconds per question)")
     print(f"💾 Data saved to {out_path}")
+    
+    # Print final statistics if using database-backed estimator
+    if estimator is not None:
+        try:
+            pool = estimator.estimate_total_questions_in_pool()
+            print(f"\n📊 Final Statistics:")
+            print(f"  Questions extracted: {extracted}")
+            print(f"  Unique questions: {uniques}")
+            print(f"  Duplicates: {duplicates}")
+            print(f"  Estimated total pool size: {pool['combined']:.0f} questions")
+            print(f"  Coverage: {(1-pool['p0'])*100:.1f}% of pool observed")
+        except Exception as e:
+            print(f"⚠️  Statistics failed: {e}")
     try:
         if store is not None:
             # Close out run stats
@@ -1112,7 +1052,9 @@ def loop_additional_quizzes(driver, num_additional_sets=2, wait_seconds=7):
       - start a new quiz in a new tab, switch to it
       - extract questions to question_set_{k}.jsonl (1-indexed for additional runs)
     """
+    print(f"\n🔄 Starting {num_additional_sets} additional quiz runs...")
     for k in range(1, num_additional_sets + 1):
+        print(f"\n📝 Starting additional quiz run {k}/{num_additional_sets}...")
         try:
             time.sleep(wait_seconds)
             # Close current quiz tab
@@ -1149,10 +1091,14 @@ def loop_additional_quizzes(driver, num_additional_sets=2, wait_seconds=7):
 
             # Extract this set to the next available question_set_N.jsonl
             out_path = _next_question_set_filename(".")
+            print(f"💾 Extracting to: {out_path}")
             iterate_questions(driver, max_questions=80, out_path=out_path, enable_network_logs=True)
+            print(f"✅ Completed additional quiz run {k}/{num_additional_sets}")
         except Exception as e:
             print(f"⚠️  Error in quiz loop iteration {k}: {e}")
             break
+    
+    print(f"\n🎉 Completed all {num_additional_sets} additional quiz runs!")
 
 
 def test_clicking_approaches(driver):
@@ -1230,6 +1176,7 @@ def main():
     """Main function"""
     print("🚀 Starting RECONNAISSANCE SCRIPT")
     print("=" * 50)
+    print(f"📊 Configuration: ADDITIONAL_SETS = {ADDITIONAL_SETS}")
     
     driver = None
     try:
@@ -1238,20 +1185,18 @@ def main():
         # Login and navigate to results
         driver = login_and_navigate_to_results(driver)
         
-        # Comprehensive page analysis
+        # Quick page analysis
         comprehensive_page_analysis(driver)
-        
-        # Test clicking approaches
-        test_clicking_approaches(driver)
 
         # Iterate questions and extract data (first set) -> save to next question_set_N.jsonl
         first_out = _next_question_set_filename(".")
         iterate_questions(driver, max_questions=80, out_path=first_out, enable_network_logs=True)
 
         # Run additional quizzes, saving as question_set_1.jsonl, question_set_2.jsonl, ...
-        loop_additional_quizzes(driver, num_additional_sets=2, wait_seconds=7)
+        loop_additional_quizzes(driver, num_additional_sets=ADDITIONAL_SETS, wait_seconds=7)
         
-        print("\n✅ Reconnaissance complete!")
+        print("\n🎉 All extractions complete!")
+        print(f"📁 Check the question_set_*.jsonl files for extracted data")
         
     except Exception as e:
         print(f"❌ Reconnaissance failed: {e}")
