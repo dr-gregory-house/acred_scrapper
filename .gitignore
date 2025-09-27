@@ -1,0 +1,25 @@
+# Database files
+*.db
+*.sqlite3
+
+# Environment variables
+.env
+
+# Python virtual environment
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Logs and output files
+nohup.out
+*.log
+page_source.html
+
+# Scraped data payloads
+data_payloads/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
