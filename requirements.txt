@@ -1,5 +1,11 @@
-jsonlines>=4.0.0
-selenium
-python-dotenv
-lxml
-sqlite3
+# For reading/writing JSON Lines
+jsonlines>=4.0.0,<5.0.0
+
+# Web automation for scraping
+selenium>=4.12.0,<5.0.0
+
+# For environment variable management
+python-dotenv>=1.0.0,<2.0.0
+
+# For XML and HTML parsing
+lxml>=4.9.0,<5.0.0
