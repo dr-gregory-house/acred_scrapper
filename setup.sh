@@ -30,8 +30,8 @@ echo "Detected Brave version: $BRAVE_VERSION"
 DRIVER_URL="https://storage.googleapis.com/chrome-for-testing-public/${BRAVE_VERSION}/linux64/chromedriver-linux64.zip"
 echo "Downloading ChromeDriver from: $DRIVER_URL"
 
-# Download, unzip, make executable, and clean up
-wget -N $DRIVER_URL
+# , unzip, make executable, and clean up
+
 unzip chromedriver-linux64.zip
 chmod +x ./chromedriver-linux64/chromedriver
 rm chromedriver-linux64.zip
